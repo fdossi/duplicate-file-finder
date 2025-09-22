@@ -6,6 +6,14 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from multiprocessing import Pool, cpu_count
 
+# Try to import fuzzywuzzy for more advanced fuzzy matching
+try:
+    from fuzzywuzzy import fuzz
+    FUZZYWUZZY_AVAILABLE = True
+except ImportError:
+    FUZZYWUZZY_AVAILABLE = False
+    print("FuzzyWuzzy not found. Falling back to built-in SequenceMatcher for name comparison.")
+
 def calculate_file_hash(file_path, method='sha256'):
     """Calculate file hash using the specified method."""
     if not os.path.exists(file_path) or os.path.islink(file_path):
@@ -27,11 +35,24 @@ def normalize_filename(filename):
     name = re.sub(r'\d+$', '', name).strip()
     return name.lower() + ext.lower()
 
-def similar_name(file1, file2, threshold=0.85):
-    """Determine if two filenames are similar using fuzzy matching after normalization."""
-    return SequenceMatcher(None, normalize_filename(file1), normalize_filename(file2)).ratio() >= threshold
+def similar_name(file1, file2, threshold=85):
+    """
+    Determine if two filenames are similar using a fuzzy matching algorithm.
+    Uses FuzzyWuzzy if available, otherwise falls back to SequenceMatcher.
+    """
+    name1 = normalize_filename(os.path.basename(file1))
+    name2 = normalize_filename(os.path.basename(file2))
+    
+    if FUZZYWUZZY_AVAILABLE:
+        # FuzzyWuzzy's fuzz.ratio returns a score from 0 to 100.
+        score = fuzz.ratio(name1, name2)
+        return score >= threshold
+    else:
+        # SequenceMatcher's ratio returns a score from 0.0 to 1.0.
+        score = SequenceMatcher(None, name1, name2).ratio() * 100
+        return score >= threshold
 
-def move_to_trash(file, trash_folder):
+def move_to_trash(file, trash_folder, dry_run=False):
     """Move a file to the Trash folder, renaming it if necessary."""
     if not os.path.exists(file):
         print(f"Warning: File not found, skipping move: {file}")
@@ -47,13 +68,16 @@ def move_to_trash(file, trash_folder):
         dest_path = os.path.join(trash_folder, new_name)
         counter += 1
     
-    try:
-        shutil.move(file, dest_path)
-        print(f"Moved to Trash: {dest_path}")
-    except PermissionError:
-        print(f"Error: Permission denied while trying to move {file}.")
-    except Exception as e:
-        print(f"Unexpected error while moving {file}: {e}")
+    if dry_run:
+        print(f"[DRY-RUN] Would move to Trash: {dest_path}")
+    else:
+        try:
+            shutil.move(file, dest_path)
+            print(f"Moved to Trash: {dest_path}")
+        except PermissionError:
+            print(f"Error: Permission denied while trying to move {file}.")
+        except Exception as e:
+            print(f"Unexpected error while moving {file}: {e}")
 
 def find_duplicate_files(folder_path):
     """Find duplicate files by size, then by hash."""
@@ -61,7 +85,6 @@ def find_duplicate_files(folder_path):
     duplicates = []
     
     print("Scanning for files...")
-    # Group files by size
     for root, _, files in os.walk(folder_path):
         for file in files:
             file_path = os.path.join(root, file)
@@ -72,7 +95,6 @@ def find_duplicate_files(folder_path):
                 except OSError as e:
                     print(f"Error getting size of {file_path}: {e}")
     
-    # Check for exact duplicates using hash
     potential_duplicates = [files for files in size_dict.values() if len(files) > 1]
     
     print("Comparing file hashes...")
@@ -105,7 +127,6 @@ def find_similar_names(folder_path, existing_duplicates):
 
     for file_list in name_dict.values():
         if len(file_list) > 1:
-            # Simple pairwise comparison for now
             for i in range(len(file_list)):
                 for j in range(i + 1, len(file_list)):
                     if similar_name(os.path.basename(file_list[i]), os.path.basename(file_list[j])):
@@ -113,7 +134,7 @@ def find_similar_names(folder_path, existing_duplicates):
     
     return similar_names
 
-def handle_duplicates(duplicates, folder_path):
+def handle_duplicates(duplicates, folder_path, dry_run):
     if duplicates:
         print("Duplicate files found:")
         for i, file_list in enumerate(duplicates, 1):
@@ -122,6 +143,10 @@ def handle_duplicates(duplicates, folder_path):
                 print(f" - {file}")
             print("\n")
         
+        if dry_run:
+            print("--- DRY-RUN MODE: No files will be deleted or moved. ---")
+            return
+
         print("Choose an action:")
         print("1 - Delete duplicates (keep one)")
         print("2 - Move duplicates to Trash (keep one)")
@@ -164,6 +189,9 @@ def main():
             print(f"Error: Folder '{folder_path}' does not exist. Please try again.")
             continue
         
+        dry_run_choice = input("Run in dry-run mode to only preview actions? (yes/no): ").strip().lower()
+        dry_run = dry_run_choice == 'yes'
+        
         # Run duplicate detection logic
         exact_duplicates = find_duplicate_files(folder_path)
         similar_names_duplicates = find_similar_names(folder_path, exact_duplicates)
@@ -171,7 +199,7 @@ def main():
         # Combine the lists and handle duplicates
         all_duplicates = exact_duplicates + similar_names_duplicates
         
-        handle_duplicates(all_duplicates, folder_path)
+        handle_duplicates(all_duplicates, folder_path, dry_run)
         
         break
 

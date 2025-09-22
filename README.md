@@ -1,75 +1,95 @@
 # Duplicate File Finder
 
 ## Overview
-This script efficiently identifies and manages duplicate files within a specified directory using multiple approaches. It detects duplicate files based on filename similarity, file size, and cryptographic hash comparisons. The script provides users with three options for handling duplicates: delete, move to trash, or keep them.
+
+This Python script efficiently identifies and manages duplicate files within a specified directory. It uses a comprehensive approach that combines content-based SHA-256 hashing for exact duplicates with advanced fuzzy filename matching for near-duplicates. The script is interactive, guiding you through a scan and presenting a consolidated list of duplicates. You can then choose to delete them, move them to a "Trash" folder, or keep them. It also includes a **dry-run mode** for safe previews of all actions.
+
+-----
 
 ## Features
-- **Filename Normalization**: Detects minor differences such as trailing numbers in filenames.
-- **Fuzzy Matching**: Uses similarity scoring to detect near-duplicate filenames.
-- **File Hashing**: Compares file contents using SHA-256 hashing to confirm duplication.
-- **Smart Handling of Missing Files**: Skips files that no longer exist to prevent errors.
-- **User Options**: Allows users to delete, move to a `Trash` folder, or keep duplicates.
+
+  * **Comprehensive Detection**: Combines content-based SHA-256 hashing for exact duplicates with an advanced fuzzy filename matching algorithm for near-duplicates.
+  * **Performance Optimized**: Utilizes **multiprocessing** to calculate file hashes in parallel, significantly reducing scan time on large directories.
+  * **Interactive Prompts**: Guides the user by asking for the folder path and run options directly in the terminal, eliminating the need to edit the code.
+  * **Dry-Run Mode**: Allows you to run the scan and preview all actions (deleting or moving) without making any permanent changes to your files.
+  * **Smart Handling**: Gracefully skips symbolic links and handles permission errors to prevent the script from crashing.
+  * **User Options**: Provides clear choices to delete files, move them to a `Trash` folder, or leave them untouched.
+
+-----
+
+## How It Works
+
+1.  **Path and Mode Input**: The script prompts the user to enter the directory path and to select whether to run in dry-run mode.
+2.  **Initial Scan**: It walks through all files in the specified directory, initially grouping them by file size.
+3.  **Hash Comparison**: For groups with multiple files, the script calculates the **SHA-256 hash** of each file's content using multiple processes. Files with identical hashes are flagged as exact duplicates.
+4.  **Filename Matching**: It then performs a separate scan to identify files with similar normalized filenames using an improved fuzzy matching algorithm.
+5.  **Consolidated Report**: The script combines the results from both the hash and name similarity checks into a single, comprehensive list.
+6.  **User Action**: Finally, it prompts the user to select an action for handling the detected files. If in **dry-run mode**, the script will only display the actions it would take without executing them.
+
+-----
 
 ## Installation
-1. Clone or download this repository:
-   ```sh
-   git clone https://github.com/yourusername/duplicate-file-finder.git
-   cd duplicate-file-finder
-   ```
-2. Install dependencies (if necessary):
-   ```sh
-   pip install --user
-   ```
+
+1.  Clone or download this repository:
+    ```sh
+    git clone https://github.com/yourusername/duplicate-file-finder.git
+    cd duplicate-file-finder
+    ```
+2.  This script uses the standard Python library, but for improved name similarity detection, you can optionally install the `fuzzywuzzy` library.
+    ```sh
+    pip install fuzzywuzzy
+    ```
+
+-----
 
 ## Usage
-Run the script with Python:
+
+Run the script with Python. It will prompt you for all the necessary information.
+
 ```sh
 python find_duplicates.py
 ```
 
-### User Prompt Options:
-When duplicate files are found, you will be prompted with the following options:
-- `1`: Delete duplicate files (keep one copy)
-- `2`: Move duplicate files to a `Trash` folder
-- `3`: Keep all duplicates
+### Example Interaction
 
-### Example Output:
 ```
+Please enter the folder path to scan for duplicates (or 'exit' to quit): C:\Users\username\path-to-folder
+Run in dry-run mode to only preview actions? (yes/no): yes
+Scanning for files...
+Comparing file hashes...
+Checking for similar filenames...
+
 Duplicate files found:
 Set 1:
- - C:\\Users\\username\\path-to-folder\\file1.pdf
- - C:\\Users\\username\\path-to-folder\\file1_2.pdf
+ - C:\Users\username\path-to-folder\file1.pdf
+ - C:\Users\username\path-to-folder\file1_2.pdf
+ - C:\Users\username\path-to-folder\file1(copy).pdf
 
-Choose an action:
-1 - Delete duplicates (keep one)
-2 - Move duplicates to Trash (keep one)
-3 - Keep all duplicates
-Enter your choice (1/2/3): 2
-Moved to Trash: C:\\Users\\username\\path-to-folder\\file1_2.pdf
+--- DRY-RUN MODE: No files will be deleted or moved. ---
 ```
 
-## How It Works
-1. **Scans Directory**: The script walks through all files in the specified directory.
-2. **Groups by File Size**: Files with identical sizes are considered for further comparison.
-3. **Compares Hash Values**: Files with matching hashes are flagged as duplicates.
-4. **Checks Filename Similarity**: Uses fuzzy matching to catch small variations.
-5. **Handles User Choice**: Prompts the user to delete, move, or keep duplicates.
-
-## Error Handling
-- If a file is missing when attempting to move or delete, the script logs a warning and continues execution.
-- If an unexpected error occurs, the script displays the error message instead of crashing.
+-----
 
 ## Future Improvements
-- Add GUI support for easier interaction.
-- Implement multi-threading for faster duplicate detection.
-- Support cloud storage directories (Google Drive, Dropbox, etc.).
+
+  * Add a graphical user interface (GUI) for a more intuitive user experience.
+  * Provide more detailed reports or logs of the actions taken.
+  * Support cloud storage directories (Google Drive, Dropbox, etc.).
+
+-----
 
 ## License
-This project is licensed under the MIT License. Feel free to modify and distribute it.
+
+This project is licensed under the MIT License. 
+
+-----
 
 ## Contributing
-Contributions are welcome! If you have suggestions or improvements, create a pull request or open an issue on GitHub.
+
+Contributions are welcome\! If you have suggestions or improvements, please create a pull request or open an issue on GitHub.
+
+-----
 
 ## Author
-Developed by **Fabio Dossi**.
 
+Developed by **Fabio Dossi**.
