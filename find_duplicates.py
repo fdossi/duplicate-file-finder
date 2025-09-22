@@ -4,24 +4,32 @@ import shutil
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
+from multiprocessing import Pool, cpu_count
 
 def calculate_file_hash(file_path, method='sha256'):
     """Calculate file hash using the specified method."""
+    if not os.path.exists(file_path) or os.path.islink(file_path):
+        return None
+    
     hash_func = hashlib.sha256() if method == 'sha256' else hashlib.md5()
     try:
         with open(file_path, 'rb') as f:
             for chunk in iter(lambda: f.read(8192), b""):
                 hash_func.update(chunk)
         return hash_func.hexdigest()
-    except (OSError, IOError) as e:
+    except (OSError, IOError, PermissionError) as e:
         print(f"Error reading {file_path}: {e}")
         return None
 
 def normalize_filename(filename):
     """Remove numbers and special characters from filenames for better comparison."""
     name, ext = os.path.splitext(filename)
-    name = re.sub(r'\d+$', '', name).strip()  # Remove trailing numbers
+    name = re.sub(r'\d+$', '', name).strip()
     return name.lower() + ext.lower()
+
+def similar_name(file1, file2, threshold=0.85):
+    """Determine if two filenames are similar using fuzzy matching after normalization."""
+    return SequenceMatcher(None, normalize_filename(file1), normalize_filename(file2)).ratio() >= threshold
 
 def move_to_trash(file, trash_folder):
     """Move a file to the Trash folder, renaming it if necessary."""
@@ -42,57 +50,70 @@ def move_to_trash(file, trash_folder):
     try:
         shutil.move(file, dest_path)
         print(f"Moved to Trash: {dest_path}")
-    except FileNotFoundError:
-        print(f"Error: File not found while moving: {file}")
+    except PermissionError:
+        print(f"Error: Permission denied while trying to move {file}.")
     except Exception as e:
         print(f"Unexpected error while moving {file}: {e}")
 
-def similar_name(file1, file2, threshold=0.85):
-    """Determine if two filenames are similar using fuzzy matching after normalization."""
-    return SequenceMatcher(None, normalize_filename(file1), normalize_filename(file2)).ratio() >= threshold
-
 def find_duplicate_files(folder_path):
-    """Find duplicate files using multiple approaches: hash, rolling hash, and fuzzy matching."""
+    """Find duplicate files by size, then by hash."""
     size_dict = defaultdict(list)
-    hash_dict = defaultdict(list)
-    name_dict = defaultdict(list)
     duplicates = []
     
-    # First, group files by size and name similarity
+    print("Scanning for files...")
+    # Group files by size
     for root, _, files in os.walk(folder_path):
         for file in files:
             file_path = os.path.join(root, file)
-            try:
-                if os.path.exists(file_path):
+            if not os.path.islink(file_path):
+                try:
                     file_size = os.path.getsize(file_path)
                     size_dict[file_size].append(file_path)
-                    name_dict[normalize_filename(file)].append(file_path)
-            except OSError as e:
-                print(f"Error getting size of {file_path}: {e}")
+                except OSError as e:
+                    print(f"Error getting size of {file_path}: {e}")
     
-    # Identify potential duplicates by normalized filename similarity
+    # Check for exact duplicates using hash
+    potential_duplicates = [files for files in size_dict.values() if len(files) > 1]
+    
+    print("Comparing file hashes...")
+    with Pool(cpu_count()) as p:
+        for file_list in potential_duplicates:
+            hashes = p.map(calculate_file_hash, file_list)
+            hash_dict = defaultdict(list)
+            for i, h in enumerate(hashes):
+                if h:
+                    hash_dict[h].append(file_list[i])
+            
+            for file_group in hash_dict.values():
+                if len(file_group) > 1:
+                    duplicates.append(file_group)
+    
+    return duplicates
+
+def find_similar_names(folder_path, existing_duplicates):
+    """Find files with similar names using fuzzy matching, excluding already found exact duplicates."""
+    name_dict = defaultdict(list)
+    similar_names = []
+    existing_dup_files = {f for sublist in existing_duplicates for f in sublist}
+
+    print("Checking for similar filenames...")
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if file_path not in existing_dup_files:
+                name_dict[normalize_filename(file)].append(file_path)
+
     for file_list in name_dict.values():
         if len(file_list) > 1:
+            # Simple pairwise comparison for now
             for i in range(len(file_list)):
                 for j in range(i + 1, len(file_list)):
                     if similar_name(os.path.basename(file_list[i]), os.path.basename(file_list[j])):
-                        duplicates.append([file_list[i], file_list[j]])
+                        similar_names.append([file_list[i], file_list[j]])
     
-    # Compare file hashes within same-size groups
-    for file_list in size_dict.values():
-        if len(file_list) > 1:
-            for file in file_list:
-                if os.path.exists(file):
-                    file_hash = calculate_file_hash(file, method='sha256')
-                    if file_hash:
-                        hash_dict[file_hash].append(file)
-    
-    # Collect duplicates from hash comparisons
-    for file_list in hash_dict.values():
-        if len(file_list) > 1 and file_list not in duplicates:
-            duplicates.append(file_list)
-    
-    # Handle duplicates after gathering all
+    return similar_names
+
+def handle_duplicates(duplicates, folder_path):
     if duplicates:
         print("Duplicate files found:")
         for i, file_list in enumerate(duplicates, 1):
@@ -109,10 +130,15 @@ def find_duplicate_files(folder_path):
         
         if choice == "1":
             for file_list in duplicates:
-                for file in file_list[1:]:  # Keep one, delete the rest
+                for file in file_list[1:]:
                     if os.path.exists(file):
-                        os.remove(file)
-                        print(f"Deleted: {file}")
+                        try:
+                            os.remove(file)
+                            print(f"Deleted: {file}")
+                        except PermissionError:
+                            print(f"Error: Permission denied while trying to delete {file}.")
+                        except Exception as e:
+                            print(f"Unexpected error while deleting {file}: {e}")
                     else:
                         print(f"Warning: File not found, skipping deletion: {file}")
         elif choice == "2":
@@ -128,9 +154,27 @@ def find_duplicate_files(folder_path):
     else:
         print("No duplicate files found.")
 
+def main():
+    while True:
+        folder_path = input("Please enter the folder path to scan for duplicates (or 'exit' to quit): ").strip()
+        if folder_path.lower() == 'exit':
+            break
+
+        if not os.path.exists(folder_path):
+            print(f"Error: Folder '{folder_path}' does not exist. Please try again.")
+            continue
+        
+        # Run duplicate detection logic
+        exact_duplicates = find_duplicate_files(folder_path)
+        similar_names_duplicates = find_similar_names(folder_path, exact_duplicates)
+        
+        # Combine the lists and handle duplicates
+        all_duplicates = exact_duplicates + similar_names_duplicates
+        
+        handle_duplicates(all_duplicates, folder_path)
+        
+        break
+
+
 if __name__ == "__main__":
-    folder_path = r"C:\\Users\\fabio\\Downloads\\Zotero"
-    if os.path.exists(folder_path):
-        find_duplicate_files(folder_path)
-    else:
-        print(f"Folder '{folder_path}' does not exist.")
+    main()
